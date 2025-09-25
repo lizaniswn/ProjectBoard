@@ -61,7 +61,7 @@ const ProjectBoard = () => {
         <InviteMember />
       </div>
       <div className="project-board-container">
-        <h2 className="project-board-title">Projects</h2>
+        <h2 className="project-board-title">Projects.</h2>
         <div>
           {projects.length === 0 ? (
             <p>No projects found.</p>
