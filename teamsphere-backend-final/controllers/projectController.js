@@ -31,7 +31,10 @@ exports.getProjects = async (req, res) => {
   try {
     const projects = await Project.find()
      .populate({ path: 'members', select: 'name' })
-     .populate({ path: 'tasks', select: 'title' });
+     .populate({ 
+       path: 'tasks', 
+       select: 'title description status dueDate createdAt updatedAt'
+     });
     res.json({ success: true, count: projects.length, data: projects });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -91,5 +94,3 @@ exports.moveTaskToProject = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
-

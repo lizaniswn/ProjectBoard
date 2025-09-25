@@ -1,0 +1,208 @@
+name: Build and Deploy TeamSphere
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: docker.io
+  BACKEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/teamsphere-backend-final
+  FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/teamsphere-frontend-final
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Debug secrets
+      run: |
+        echo "Docker username exists: ${{ secrets.DOCKER_USERNAME != '' }}"
+        echo "Docker password exists: ${{ secrets.DOCKER_PASSWORD != '' }}"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./teamsphere-backend-final
+        file: ./teamsphere-backend-final/Dockerfile
+        push: true
+        tags: |
+          ${{ env.BACKEND_IMAGE }}:latest
+          ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Debug secrets
+      run: |
+        echo "Docker username exists: ${{ secrets.DOCKER_USERNAME != '' }}"
+        echo "Docker password exists: ${{ secrets.DOCKER_PASSWORD != '' }}"
+
+    - name: Debug repository structure
+      run: |
+        echo "Current working directory:"
+        pwd
+        echo "Repository root contents:"
+        ls -la
+        echo "Looking for package.json files:"
+        find . -name "package.json" -type f
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        if [ -d "teamsphere-frontend-final" ]; then
+          cd teamsphere-frontend-final
+          echo "Found teamsphere-frontend-final directory"
+          ls -la
+          if [ ! -f "package.json" ]; then
+            echo "package.json not found, creating basic package.json"
+            cat > package.json << 'EOF'
+{
+  "name": "teamsphere-frontend-final",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.3.2",
+    "@reduxjs/toolkit": "^2.9.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "ajv": "^6.12.6",
+    "ajv-keywords": "^3.5.2",
+    "axios": "^1.12.2",
+    "react": "^18.3.1",
+    "react-beautiful-dnd": "^13.1.1",
+    "react-dom": "^18.3.1",
+    "react-redux": "^9.2.0",
+    "react-router-dom": "^6.26.1",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "overrides": {
+    "ajv": "^6.12.6",
+    "ajv-keywords": "^3.5.2"
+  }
+}
+EOF
+          fi
+          npm install --legacy-peer-deps
+        else
+          echo "teamsphere-frontend-final directory not found"
+          exit 1
+        fi
+
+    - name: Build application
+      run: |
+        if [ -d "teamsphere-frontend-final" ]; then
+          cd teamsphere-frontend-final
+          npm run build
+        else
+          npm run build
+        fi
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./teamsphere-frontend-final
+        file: ./teamsphere-frontend-final/Dockerfile
+        push: true
+        tags: |
+          ${{ env.FRONTEND_IMAGE }}:latest
+          ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+  deploy-local:
+    needs: [build-backend, build-frontend]
+    runs-on: self-hosted
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create deployment directory
+      run: |
+        mkdir -p ~/teamsphere-deployment
+        cp docker-compose.yml ~/teamsphere-deployment/
+        cp .env ~/teamsphere-deployment/ 2>/dev/null || true
+
+    - name: Update docker-compose for production images
+      working-directory: ~/teamsphere-deployment
+      run: |
+        sed -i 's|build:|# build:|g' docker-compose.yml
+        sed -i 's|context: ./teamsphere-backend-final|# context: ./teamsphere-backend-final|g' docker-compose.yml
+        sed -i 's|context: ./teamsphere-frontend-final|# context: ./teamsphere-frontend-final|g' docker-compose.yml
+        sed -i '/dockerfile: Dockerfile/c\    image: ${{ env.BACKEND_IMAGE }}:latest' docker-compose.yml
+
+    - name: Pull latest images
+      run: |
+        docker pull ${{ env.BACKEND_IMAGE }}:latest
+        docker pull ${{ env.FRONTEND_IMAGE }}:latest
+
+    - name: Deploy application
+      working-directory: ~/teamsphere-deployment
+      run: |
+        docker-compose down || true
+        docker-compose up -d
+
+    - name: Wait for services
+      run: sleep 30
+
+    - name: Health check
+      run: |
+        curl -f http://localhost:5001/api/projects/health || exit 1
+        curl -f http://localhost || exit 1
+        echo "✅ Deployment successful!"

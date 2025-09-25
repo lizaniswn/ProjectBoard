@@ -10,6 +10,10 @@ const {
   moveTaskToProject
 } = require("../controllers/projectController");
 
+// Health check endpoint
+router.get("/health", (req, res) => {
+  res.json({ status: "OK", message: "Projects API is running", timestamp: new Date().toISOString() });
+});
 
 router.post("/", createProject);      // Create
 router.get("/", getProjects);         // Read All
